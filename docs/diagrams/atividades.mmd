@@ -1,0 +1,71 @@
+%% Artefato 2 - Diagrama de Atividades com Raias - Cadastro de Ativos e Sensores
+%% Barras FORK/JOIN representadas por nos escuros (Mermaid nao possui no nativo de barra)
+flowchart TB
+    classDef barra fill:#111,stroke:#111,color:#fff,font-weight:bold
+    classDef inicio fill:#111,stroke:#111,color:#fff
+    classDef fim fill:#fff,stroke:#111,stroke-width:4px,color:#111
+
+    subgraph L1["Raia 1 - Gestor"]
+        INI(("Inicio")):::inicio
+        A1["Preencher dados do ativo, sensores e pontos de medicao"]
+    end
+
+    subgraph L2["Raia 2 - Web Dashboard (React 18)"]
+        B1["Validar campos obrigatorios do formulario"]
+        D1{"Formulario completo?"}
+        B2["Destacar campos pendentes"]
+        B3["Enviar POST /ativos (HTTPS)"]
+        B4["Exibir erro de negocio ou validacao"]
+        B6["Exibir acesso negado"]
+        B5["Exibir confirmacao 201"]
+    end
+
+    subgraph L3["Raia 3 - API de Cadastro (Node.js, back-end)"]
+        C1["Autenticar e autorizar perfil"]
+        D2{"Perfil autorizado?"}
+        C2["Retornar 403 Acesso Negado"]
+        C3["Verificar responsavel e unicidade da tag"]
+        D3{"Vinculos validos?"}
+        F1["=== FORK validacoes ==="]:::barra
+        C5["Validar numero de serie unico dos sensores"]
+        C6["Validar pontos: ativo, unidade, grandeza e validade da verificacao"]
+        J1["=== JOIN validacoes ==="]:::barra
+        D4{"Validacao sem erros?"}
+        C7["Retornar 422 com lista de erros"]
+        C8["Persistir Ativo PARADO e INDETERMINADA, Sensores e Pontos em transacao"]
+        C9["Transicionar sensores PENDENTE_VERIFICACAO para EM_MONITORAMENTO"]
+        D5{"Transicao aceita?"}
+        C4["Reverter transacao e retornar 409 Conflito"]
+        C10["Publicar AtivoCadastradoEvent no RabbitMQ"]
+        F2["=== FORK pos-cadastro ==="]:::barra
+        C11["Responder 201 AtivoCadastradoDTO"]
+        J2["=== JOIN pos-cadastro ==="]:::barra
+        FIM1(("Fim negado")):::fim
+        FIM2(("Fim cadastro concluido")):::fim
+    end
+
+    subgraph L4["Raia 4 - Servicos Assincronos (consumidores RabbitMQ)"]
+        E1["Auditoria: registrar RegistroAuditoriaDTO"]
+        E2["Monitoramento: atualizar configuracao de ativos e pontos"]
+    end
+
+    INI --> A1 --> B1 --> D1
+    D1 -->|"[campos incompletos]"| B2 --> A1
+    D1 -->|"[campos completos]"| B3 --> C1 --> D2
+    D2 -->|"[perfil != GESTOR]"| C2 --> B6 --> FIM1
+    D2 -->|"[perfil == GESTOR]"| C3 --> D3
+    D3 -->|"[responsavel inexistente ou tag duplicada]"| C4
+    D3 -->|"[responsavel existente e tag inedita]"| F1
+    F1 --> C5 --> J1
+    F1 --> C6 --> J1
+    J1 --> D4
+    D4 -->|"[erros.notEmpty()]"| C7 --> B4
+    D4 -->|"[erros.isEmpty()]"| C8 --> C9 --> D5
+    D5 -->|"[transicao recusada]"| C4
+    C4 --> B4
+    B4 --> A1
+    D5 -->|"[transicao aceita]"| C10 --> F2
+    F2 --> C11 --> B5 --> J2
+    F2 --> E1 --> J2
+    F2 --> E2 --> J2
+    J2 --> FIM2

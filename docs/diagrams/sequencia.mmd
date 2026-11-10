@@ -1,0 +1,86 @@
+%% Artefato 1 - Diagrama de Sequencia - Cadastro de Ativos e Sensores (RF02 / UC04)
+sequenceDiagram
+    autonumber
+    actor G as Gestor
+    participant UI as CadastroPage
+    participant API as AtivoController
+    participant AUTH as AuthService
+    participant SVC as CadastroAtivoService
+    participant RESP as ResponsavelRepository
+    participant VAL as ValidadorPontoMedicao
+    participant ATV as AtivoRepository
+    participant SEN as SensorRepository
+    participant PM as PontoMedicaoRepository
+    participant BUS as EventPublisher
+    participant AUD as AuditoriaService
+    participant MON as ConfiguracaoMonitoramentoService
+
+    G->>UI: submeterCadastro(FormularioCadastroDTO)
+    UI->>API: cadastrarAtivo(CadastroAtivoRequestDTO)
+    API->>AUTH: autorizar(token, "ATIVO_CADASTRAR")
+    AUTH-->>API: AutorizacaoDTO
+
+    alt autorizacao.permitido == false
+        API-->>UI: 403 ErroDTO(ACESSO_NEGADO)
+        UI-->>G: exibe acesso negado
+    else autorizacao.permitido == true
+        API->>SVC: registrar(CadastroAtivoCommand)
+        SVC->>RESP: buscarPorId(responsavelId)
+        RESP-->>SVC: Responsavel
+        SVC->>ATV: existePorTag(tag)
+        ATV-->>SVC: boolean
+
+        alt responsavel inexistente ou tag ja cadastrada
+            SVC-->>API: ErroDominio(RESPONSAVEL_INVALIDO ou TAG_DUPLICADA)
+            API-->>UI: 409 ErroDTO
+            UI-->>G: exibe conflito de cadastro
+        else vinculos validos
+            par validacao dos sensores
+                loop para cada sensor da requisicao
+                    SVC->>SEN: existePorNumeroSerie(numeroSerie)
+                    SEN-->>SVC: boolean
+                end
+            and validacao dos pontos de medicao
+                loop para cada ponto de medicao de cada sensor
+                    SVC->>VAL: validar(PontoMedicaoDTO)
+                    VAL-->>SVC: ResultadoValidacaoDTO
+                end
+            end
+
+            alt erros.isEmpty() == false
+                SVC-->>API: ErroDominio(VALIDACAO_FALHOU, ResultadoValidacaoDTO)
+                API-->>UI: 422 ErroDTO
+                UI-->>G: exibe erros de validacao
+            else erros.isEmpty() == true
+                Note over SVC,PM: BEGIN transacao (ativo, sensores e pontos sao atomicos)
+                SVC->>ATV: salvar(Ativo)
+                ATV-->>SVC: Ativo
+                loop para cada sensor da requisicao
+                    SVC->>SEN: salvar(Sensor)
+                    SEN-->>SVC: Sensor
+                    loop para cada ponto de medicao do sensor
+                        SVC->>PM: salvar(PontoMedicao)
+                        PM-->>SVC: PontoMedicao
+                    end
+                    SVC->>SEN: transicionarEstado(sensorId, PENDENTE_VERIFICACAO, EM_MONITORAMENTO)
+                    SEN-->>SVC: boolean
+                    break transicao recusada (boolean == false) ou violacao de UNIQUE
+                        SVC-->>API: ErroDominio(ESTADO_INVALIDO) com ROLLBACK
+                        API-->>UI: 409 ErroDTO
+                        UI-->>G: exibe conflito de concorrencia
+                    end
+                end
+                Note over SVC,PM: COMMIT transacao
+                SVC-)BUS: publicar(AtivoCadastradoEvent)
+                SVC-->>API: AtivoCadastradoDTO
+                API-->>UI: 201 AtivoCadastradoDTO
+                UI-->>G: exibe confirmacao do cadastro
+
+                par entrega assincrona aos consumidores
+                    BUS-)AUD: registrar(RegistroAuditoriaDTO)
+                and
+                    BUS-)MON: atualizarConfiguracao(ConfiguracaoAtivoDTO)
+                end
+            end
+        end
+    end
