@@ -1,0 +1,27 @@
+%% Artefato 4 - C4 Nivel 2 (Conteineres) - Cadastro de Ativos e Sensores
+C4Container
+    title Diagrama de Conteineres (C4 Nivel 2) - Cadastro de Ativos e Sensores - AutoFlow Monitor
+
+    Person(gestor, "Gestor", "Cadastra ativos, sensores, pontos de medicao e responsaveis")
+    Person(consulta, "Operador, Tecnico e Analista", "Consultam ativos e saude dos sensores no dashboard")
+    System_Ext(aquisicao, "Infraestrutura de Aquisicao Industrial", "Gateway que coleta CNC e sensores e envia telemetria")
+
+    System_Boundary(autoflow, "AutoFlow Monitor") {
+        Container(web, "Web Dashboard", "React 18, TypeScript", "SPA com formularios de cadastro e dashboard")
+        Container(api, "API de Cadastro", "Node.js 20, NestJS", "Autentica via JWT, autoriza por perfil, valida e persiste o cadastro. Publica eventos de dominio")
+        ContainerQueue(broker, "Broker de Mensagens", "RabbitMQ 3.13", "Exchange topic cadastro.eventos com filas duraveis por consumidor")
+        Container(aud, "Servico de Auditoria", "Node.js 20", "Consome eventos e grava trilha de auditoria sem sobrescrever registros")
+        Container(mon, "Servico de Monitoramento", "Node.js 20", "Mantem configuracao de ativos e pontos e processa telemetria")
+        ContainerDb(db, "Banco de Dados", "PostgreSQL 16", "Schemas cadastro, auditoria e monitoramento")
+    }
+
+    Rel(gestor, web, "Preenche cadastro de ativos e sensores", "HTTPS")
+    Rel(consulta, web, "Consulta ativos e sensores", "HTTPS")
+    Rel(web, api, "Chama operacoes de cadastro e consulta", "REST/JSON sobre HTTPS TLS 1.3")
+    Rel(api, db, "Le e grava cadastro em transacao", "SQL sobre TLS, porta 5432")
+    Rel(api, broker, "Publica AtivoCadastradoEvent", "AMQP 0-9-1 sobre TLS")
+    Rel(broker, aud, "Entrega eventos de cadastro", "AMQP 0-9-1")
+    Rel(broker, mon, "Entrega eventos de cadastro", "AMQP 0-9-1")
+    Rel(aud, db, "Grava trilha de auditoria", "SQL sobre TLS")
+    Rel(mon, db, "Atualiza configuracao de monitoramento", "SQL sobre TLS")
+    Rel(aquisicao, mon, "Envia telemetria dos pontos de medicao", "MQTT 3.1.1 sobre TLS")

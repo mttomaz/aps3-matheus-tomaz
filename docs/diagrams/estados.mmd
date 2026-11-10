@@ -1,0 +1,34 @@
+%% Artefato 3 - Maquina de Estados da entidade Sensor (ciclo de vida cadastral + estados de saude)
+stateDiagram-v2
+    [*] --> PendenteVerificacao : sensorCadastrado [perfil == GESTOR and numeroSerieUnico == true] / registrarAuditoria(SENSOR_CADASTRADO)
+
+    PendenteVerificacao : PendenteVerificacao
+    PendenteVerificacao : entry / registrarInicioDaVerificacao()
+    PendenteVerificacao : do / aguardarVinculoDoPontoDeMedicao()
+    PendenteVerificacao : exit / registrarFimDaVerificacao()
+
+    PendenteVerificacao --> EmMonitoramento : pontoMedicaoVinculado [verificacaoValida == true and unidadeInformada == true] / publicarEvento(SensorHabilitado)
+    PendenteVerificacao --> Desativado : cadastroCancelado [perfil == GESTOR] / registrarAuditoria(CADASTRO_CANCELADO)
+
+    state EmMonitoramento {
+        [*] --> SemComunicacao
+        SemComunicacao --> Disponivel : leituraValidaRecebida [qualidade == VALIDA] / atualizarUltimaLeitura()
+        Disponivel --> SemComunicacao : timeoutLeitura [segundosSemLeitura ≥ 30] / sinalizarIndisponibilidade()
+        Disponivel --> Suspeito : leituraSuspeita [faixaFisicaViolada == true or valorRepetido5min == true] / registrarVerificacao()
+        Suspeito --> Disponivel : investigacaoConcluida [conclusao == DESCARTADA] / limparSuspeita()
+        Suspeito --> SemComunicacao : timeoutLeitura [segundosSemLeitura ≥ 30] / sinalizarIndisponibilidade()
+    }
+
+    SemComunicacao : SemComunicacao
+    SemComunicacao : entry / iniciarTemporizador(30s)
+    Disponivel : Disponivel
+    Disponivel : do / monitorarJanelaDeLeituras()
+    Suspeito : Suspeito
+    Suspeito : entry / abrirVerificacaoDeLeitura()
+
+    EmMonitoramento --> PendenteVerificacao : remontagemRegistrada [perfil == GESTOR] / invalidarVerificacao()
+    EmMonitoramento --> Desativado : desativacaoSolicitada [perfil == GESTOR] / registrarAuditoria(SENSOR_DESATIVADO)
+
+    Desativado : Desativado
+    Desativado : entry / bloquearNovasLeituras()
+    Desativado --> [*]
